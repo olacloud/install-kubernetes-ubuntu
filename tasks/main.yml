@@ -1,0 +1,149 @@
+---
+- name: Update APT packages
+  apt:
+    update_cache: yes
+
+- name: Disable SWAP (Kubeadm/Kubelet requirement)
+  shell: |
+   swapoff -a
+
+- name: Disable SWAP in fstab permanently (Kubeadm/Kubelet requirement)
+  replace:
+    path: /etc/fstab
+    regexp: '^([^#].*?\sswap\s+sw\s+.*)$'
+    replace: '# \1'
+
+- name: Create an empty file for the Containerd module
+  copy:
+    dest: /etc/modules-load.d/k8s.conf
+    content: |
+             overlay
+             br_netfilter
+
+- name: Load overlay kernel module
+  modprobe:
+    name: overlay
+    state: present
+
+- name: Load br_netfilter kernel module
+  modprobe:
+    name: br_netfilter
+    state: present
+
+- name: Create an empty file for Kubernetes sysctl params
+  copy:
+    content: ""
+    dest: /etc/sysctl.d/k8s.conf
+    force: no
+
+- name: Configure sysctl params for Kubernetes
+  lineinfile:
+    path: /etc/sysctl.d/k8s.conf
+    line: "{{ item }}"
+  with_items:
+    - 'net.bridge.bridge-nf-call-iptables  = 1'
+    - 'net.ipv4.ip_forward                 = 1'
+    - 'net.bridge.bridge-nf-call-ip6tables = 1'
+
+- name: Apply sysctl params without reboot
+  command: sysctl --system
+
+- name: Update APT packages
+  apt:
+    update_cache: yes
+
+#- name: dpkg --configure -a ( )
+#  shell: |
+#   dpkg --configure -a
+
+- name: Install APT Transport HTTPS
+  apt:
+    name: apt-transport-https
+    state: present
+
+- name: Add Docker apt-key
+  apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+
+- name: Add Docker's APT repository
+  apt_repository:
+    repo: "deb [arch={{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }}] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    filename: "docker-{{ ansible_distribution_release }}"
+
+- name: Install Containerd
+  apt:
+    name: containerd.io
+    state: present
+
+- name: Create an empty file for the Containerd module (To use the systemd cgroup driver in /etc/containerd/config.toml with runc)
+  copy:
+    dest: /etc/containerd/config.toml
+    content: |
+             [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+               [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+                 SystemdCgroup = true
+
+- name: Enable the Containerd service and start it
+  systemd:
+    name: containerd
+    state: restarted
+    enabled: yes
+    daemon-reload: yes
+
+- name: Add Kubernetes apt-key
+  apt_key:
+    url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+    state: present
+
+- name: Add Kubernetes' APT repository
+  apt_repository:
+    repo: deb https://apt.kubernetes.io/ kubernetes-xenial main
+    state: present
+    filename: 'kubernetes'
+
+- name: Install Kubelet
+  apt:
+    name: kubelet=1.28.*
+    state: present
+    update_cache: true
+
+- name: Install Kubeadm
+  apt:
+    name: kubeadm=1.28.*
+    state: present
+
+- name: Install Kubectl
+  apt:
+    name: kubectl=1.28.*
+    state: present
+
+- name: Hold kubeadm
+  ansible.builtin.dpkg_selections:
+    name: kubeadm
+    selection: hold
+
+- name: Hold kubelet
+  ansible.builtin.dpkg_selections:
+    name: kubelet
+    selection: hold
+
+- name: Hold kubectl
+  ansible.builtin.dpkg_selections:
+    name: kubectl
+    selection: hold
+
+- name: Install master node if master variable is set to true
+  ansible.builtin.import_tasks:
+    file: master.yml
+  when: master
+
+- name: Install worker node if master variable is set to false and a master host exists in the inventory
+  ansible.builtin.import_tasks:
+    file: worker.yml
+  when:
+  - not master
+  - "'master' in groups['all']"
+
+
+
