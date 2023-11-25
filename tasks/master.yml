@@ -29,12 +29,12 @@
 - name: initialize the cluster (this could take some time)
   shell: kubeadm init --config /etc/kubernetes/kubeadm-config.yaml >> cluster_initialized.log
   args:
-    chdir: /root
+    chdir: "{{ ansible_facts.user_dir }}"
     creates: cluster_initialized.log
 
 - name: create .kube directory
   become: yes
-  become_user: root
+  become_user: "{{ ansible_facts.env.USER }}"
   file:
     path: $HOME/.kube
     state: directory
@@ -43,9 +43,9 @@
 - name: copy admin.conf to user's kube config
   copy:
     src: /etc/kubernetes/admin.conf
-    dest: $HOME/.kube/config
+    dest: "{{ ansible_facts.user_dir }}/.kube/config"
     remote_src: yes
-    owner: root
+    owner: "{{ ansible_facts.env.USER }}"
 
 - name: get join command
   shell: kubeadm token create --print-join-command
@@ -57,7 +57,7 @@
 
 - name: install Pod network
   become: yes
-  become_user: root
+  become_user: "{{ ansible_facts.env.USER }}"
   shell: kubectl apply -f https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml >> pod_network_setup.log
   args:
     chdir: $HOME
