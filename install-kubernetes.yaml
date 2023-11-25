@@ -1,0 +1,6 @@
+---
+- name: install kubernetes
+  hosts: all
+  roles:
+    - role: kubernetes
+      become: yes
